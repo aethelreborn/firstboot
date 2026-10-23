@@ -46,7 +46,7 @@ sleep 0.15
 printf '\r%s\n' "${green}[1/4] Platform: $os/$arch${reset}"
 
 printf '%s' "${cyan}[2/4] Checking latest release...${reset}"
-version="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
+version="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repo/releases/latest" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/"$//')"
 if [ -z "$version" ]; then
   printf '\r%s\n' "${red}[2/4] No GitHub release found.${reset}" >&2
   exit 1
@@ -64,7 +64,21 @@ printf '%s\n' "${green}[3/4] Download complete${reset}"
 
 printf '%s' "${cyan}[4/4] Extracting and installing...${reset}"
 tar -xzf "$archive" -C "$tmp"
-bin_dir="${PREFIX:-$HOME/.local/bin}"
+if [ -n "${PREFIX:-}" ]; then
+  bin_dir="$PREFIX"
+else
+  bin_dir=""
+  old_ifs="$IFS"
+  IFS=:
+  for path_dir in $PATH; do
+    if [ -n "$path_dir" ] && [ -d "$path_dir" ] && [ -w "$path_dir" ]; then
+      bin_dir="$path_dir"
+      break
+    fi
+  done
+  IFS="$old_ifs"
+  [ -n "$bin_dir" ] || bin_dir="$HOME/.local/bin"
+fi
 mkdir -p "$bin_dir"
 install -m 755 "$tmp/firstboot" "$bin_dir/firstboot"
 printf '\r%s\n' "${green}[4/4] Installed to $bin_dir/firstboot${reset}"
@@ -86,5 +100,5 @@ fi
 printf '\n%s\n' "${green}${bold}DONE: Firstboot is installed.${reset}"
 case ":${PATH}:" in
   *:"$bin_dir":*) printf '%s\n' "Run it with: firstboot" ;;
-  *) printf '%s\n' "Run it now with: $bin_dir/firstboot"; printf '%s\n' "For future shells: source ~/.bashrc" ;;
+  *) printf '%s\n' "Run it now with: $bin_dir/firstboot"; printf '%s\n' "For future shells: source ~/.bashrc"; printf '%s\n' "Note: a piped child shell cannot refresh its parent shell's PATH." ;;
 esac
