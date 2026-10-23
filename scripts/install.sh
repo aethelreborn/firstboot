@@ -2,71 +2,72 @@
 set -eu
 
 repo="aethelreborn/firstboot"
-esc=$(printf '\033')
-blue="${esc}[38;5;81m"
-cyan="${esc}[36m"
-green="${esc}[32m"
-yellow="${esc}[33m"
-red="${esc}[31m"
-bold="${esc}[1m"
-dim="${esc}[2m"
-reset="${esc}[0m"
+tmp=""
+
+# Never make a piped installer disappear on terminals that do not interpret ANSI.
+if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+  esc=$(printf '\033')
+  blue="${esc}[38;5;81m"; cyan="${esc}[36m"; green="${esc}[32m"
+  yellow="${esc}[33m"; red="${esc}[31m"; bold="${esc}[1m"
+  dim="${esc}[2m"; reset="${esc}[0m"
+else
+  blue=""; cyan=""; green=""; yellow=""; red=""; bold=""; dim=""; reset=""
+fi
 
 cleanup() {
-  printf '%s' "${esc}[?25h${reset}"
-  [ -n "${tmp:-}" ] && rm -rf "$tmp"
+  status=$?
+  [ -n "$tmp" ] && rm -rf "$tmp"
+  if [ "$status" -ne 0 ]; then
+    printf '\n%s\n' "${red}firstboot installer failed (exit $status). Run again with: NO_COLOR=1 sh -x${reset}" >&2
+  fi
+  exit "$status"
 }
 trap cleanup EXIT INT TERM
-printf '%s' "${esc}[?25l"
 
-printf '\n%s\n' "${blue}${bold}╭──────────────────────────────────────────────╮${reset}"
-printf '%s\n' "${blue}${bold}│             FIRSTBOOT INSTALLER              │${reset}"
-printf '%s\n\n' "${blue}${bold}╰──────────────────────────────────────────────╯${reset}"
-printf '%s\n' "${dim}  A fresh OS deserves a proper firstboot.${reset}"
+printf '\n%s\n' "${blue}${bold}FIRSTBOOT INSTALLER${reset}"
+printf '%s\n' "${dim}A fresh OS deserves a proper firstboot.${reset}"
+printf '%s\n\n' "${dim}This will download and install the latest Firstboot release.${reset}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 arch="$(uname -m)"
 case "$os" in
   darwin) os="darwin" ;;
   linux) os="linux" ;;
-  *) printf '%s\n' "${red}✗ Unsupported OS: $os${reset}" >&2; exit 1 ;;
+  *) printf '%s\n' "${red}ERROR: unsupported OS: $os${reset}" >&2; exit 1 ;;
 esac
 case "$arch" in
   x86_64|amd64) arch="amd64" ;;
   aarch64|arm64) arch="arm64" ;;
-  *) printf '%s\n' "${red}✗ Unsupported architecture: $arch${reset}" >&2; exit 1 ;;
+  *) printf '%s\n' "${red}ERROR: unsupported architecture: $arch${reset}" >&2; exit 1 ;;
 esac
 
-printf '%s' "${cyan}⠋ Detecting platform${reset}"
+printf '%s' "${cyan}[1/4] Detecting platform...${reset}"
 sleep 0.15
-printf '\r%s\n' "${green}✓ Platform: $os/$arch${reset}"
+printf '\r%s\n' "${green}[1/4] Platform: $os/$arch${reset}"
 
-printf '%s' "${cyan}⠋ Checking latest release${reset}"
+printf '%s' "${cyan}[2/4] Checking latest release...${reset}"
 version="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repo/releases/latest" | sed -n 's/.*"tag_name": "\([^"]*\)".*/\1/p' | head -1)"
 if [ -z "$version" ]; then
-  printf '\r%s\n' "${red}✗ No release found. Try again later.${reset}" >&2
+  printf '\r%s\n' "${red}[2/4] No GitHub release found.${reset}" >&2
   exit 1
 fi
-printf '\r%s\n' "${green}✓ Release $version found${reset}"
+printf '\r%s\n' "${green}[2/4] Release: $version${reset}"
 
 tmp="$(mktemp -d)"
 archive="$tmp/firstboot.tar.gz"
 url="https://github.com/$repo/releases/download/$version/firstboot_${os}_${arch}.tar.gz"
 
-printf '%s\n' "${yellow}↓ Downloading firstboot — live transfer below${reset}"
-# curl's progress meter includes percentage, bytes, transfer speed, elapsed time, and ETA.
+printf '%s\n' "${yellow}[3/4] Downloading binary — curl will show live speed and ETA:${reset}"
+# Keep this download on stderr-visible progress output while the archive goes to disk.
 curl -fL --retry 3 --progress-bar --output "$archive" "$url"
-printf '%s\n' "${green}✓ Download complete${reset}"
+printf '%s\n' "${green}[3/4] Download complete${reset}"
 
-printf '%s' "${cyan}⠋ Extracting binary${reset}"
+printf '%s' "${cyan}[4/4] Extracting and installing...${reset}"
 tar -xzf "$archive" -C "$tmp"
-printf '\r%s\n' "${green}✓ Binary extracted${reset}"
-
 bin_dir="${PREFIX:-$HOME/.local/bin}"
-printf '%s' "${cyan}⠋ Installing to $bin_dir${reset}"
 mkdir -p "$bin_dir"
 install -m 755 "$tmp/firstboot" "$bin_dir/firstboot"
-printf '\r%s\n' "${green}✓ Installed firstboot to $bin_dir/firstboot${reset}"
+printf '\r%s\n' "${green}[4/4] Installed to $bin_dir/firstboot${reset}"
 
 if [ -z "${PREFIX:-}" ]; then
   case ":${PATH}:" in
@@ -82,9 +83,8 @@ if [ -z "${PREFIX:-}" ]; then
   esac
 fi
 
-printf '\n%s\n' "${green}${bold}✓ Firstboot is ready.${reset}"
+printf '\n%s\n' "${green}${bold}DONE: Firstboot is installed.${reset}"
 case ":${PATH}:" in
-  *:"$bin_dir":*) printf '%s\n' "  Run now: ${bold}firstboot${reset}" ;;
-  *) printf '%s\n' "  Run now: ${bold}$bin_dir/firstboot${reset}"; printf '%s\n' "  Then run: ${bold}source ~/.bashrc${reset}" ;;
+  *:"$bin_dir":*) printf '%s\n' "Run it with: firstboot" ;;
+  *) printf '%s\n' "Run it now with: $bin_dir/firstboot"; printf '%s\n' "For future shells: source ~/.bashrc" ;;
 esac
-printf '\n'
