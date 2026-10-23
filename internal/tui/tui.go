@@ -102,7 +102,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if !m.confirm {
 				m.cursor = len(m.packages) - 1
 			}
-		case "space":
+		case " ", "space":
 			if !m.confirm {
 				m.toggle()
 			}
