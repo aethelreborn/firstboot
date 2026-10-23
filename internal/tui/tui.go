@@ -2,46 +2,23 @@ package tui
 
 import (
 	"fmt"
-	"io"
+	"strings"
+	"time"
 
 	"github.com/aethelreborn/firstboot/internal/catalog"
-	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )
 
-type item catalog.Package
-
-func (i item) FilterValue() string { return i.Name }
+type tickMsg time.Time
 
 type model struct {
 	platform  catalog.Platform
-	list      list.Model
-	items     []catalog.Package
+	packages  []catalog.Package
+	cursor    int
 	confirm   bool
+	blink     bool
 	cancelled bool
-}
-
-type delegate struct{}
-
-func (delegate) Height() int                         { return 1 }
-func (delegate) Spacing() int                        { return 0 }
-func (delegate) Update(tea.Msg, *list.Model) tea.Cmd { return nil }
-func (delegate) Render(w io.Writer, _ list.Model, _ int, it list.Item) {
-	i, ok := it.(item)
-	if !ok {
-		return
-	}
-	mark := "[ ]"
-	if i.Installed {
-		mark = "[x]"
-	} else if i.Selected {
-		mark = "[✓]"
-	}
-	if !i.Supported {
-		mark = "[-]"
-	}
-	_, _ = fmt.Fprintf(w, "%s %s — %s", mark, i.Name, i.Description)
 }
 
 const banner = `
@@ -63,15 +40,20 @@ const banner = `
 ······················································
 `
 
+var (
+	accent   = lipgloss.NewStyle().Foreground(lipgloss.Color("205")).Bold(true)
+	muted    = lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
+	cyan     = lipgloss.NewStyle().Foreground(lipgloss.Color("86"))
+	green    = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+	yellow   = lipgloss.NewStyle().Foreground(lipgloss.Color("220"))
+	red      = lipgloss.NewStyle().Foreground(lipgloss.Color("203"))
+	focused  = lipgloss.NewStyle().Foreground(lipgloss.Color("230")).Background(lipgloss.Color("57")).Bold(true).PaddingLeft(1).PaddingRight(1)
+	selected = lipgloss.NewStyle().Foreground(lipgloss.Color("42")).Bold(true)
+)
+
 func Run(platform catalog.Platform, packages []catalog.Package) ([]catalog.Package, error) {
-	items := make([]list.Item, len(packages))
-	for i, p := range packages {
-		items[i] = item(p)
-	}
-	l := list.New(items, delegate{}, 76, 18)
-	l.Title = "Firstboot · choose missing tools"
-	m := model{platform: platform, list: l, items: packages}
-	final, err := tea.NewProgram(m).Run()
+	m := model{platform: platform, packages: packages}
+	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, err
 	}
@@ -79,50 +61,63 @@ func Run(platform catalog.Platform, packages []catalog.Package) ([]catalog.Packa
 	if out.cancelled || !out.confirm {
 		return nil, nil
 	}
-	selected := make([]catalog.Package, 0)
-	for i, raw := range out.list.Items() {
-		v := raw.(item)
-		if v.Selected {
-			selected = append(selected, out.items[i])
+	result := make([]catalog.Package, 0)
+	for _, p := range out.packages {
+		if p.Selected {
+			result = append(result, p)
 		}
 	}
-	return selected, nil
+	return result, nil
 }
 
-func (m model) Init() tea.Cmd { return nil }
+func (m model) Init() tea.Cmd { return blinkCmd() }
 
-func (m model) View() string {
-	style := lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
-	hint := lipgloss.NewStyle().Foreground(lipgloss.Color("241"))
-	status := "space toggle · a all · n none · enter review · q quit"
-	if m.confirm {
-		status = "enter confirm install · q cancel"
-	}
-	return style.Render(banner) + "\n" + hint.Render(fmt.Sprintf("Detected platform: %s · %s", m.platform, status)) + "\n\n" + m.list.View()
+func blinkCmd() tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg { return tickMsg(t) })
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if key, ok := msg.(tea.KeyMsg); ok {
-		switch key.String() {
-		case "q", "ctrl+c":
+	switch msg := msg.(type) {
+	case tickMsg:
+		m.blink = !m.blink
+		return m, blinkCmd()
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c", "q", "esc":
 			m.cancelled = true
 			return m, tea.Quit
+		case "up", "k":
+			if !m.confirm && m.cursor > 0 {
+				m.cursor--
+			}
+		case "down", "j":
+			if !m.confirm && m.cursor < len(m.packages)-1 {
+				m.cursor++
+			}
+		case "home", "g":
+			if !m.confirm {
+				m.cursor = 0
+			}
+		case "end", "G":
+			if !m.confirm {
+				m.cursor = len(m.packages) - 1
+			}
 		case "space":
 			if !m.confirm {
-				m.toggle(m.list.Index())
+				m.toggle()
 			}
 		case "a":
 			if !m.confirm {
-				for i := range m.list.Items() {
-					m.toggle(i)
+				for i := range m.packages {
+					if m.packages[i].Supported && !m.packages[i].Installed {
+						m.packages[i].Selected = true
+					}
 				}
 			}
 		case "n":
 			if !m.confirm {
-				for i, raw := range m.list.Items() {
-					v := raw.(item)
-					v.Selected = false
-					m.list.SetItem(i, v)
+				for i := range m.packages {
+					m.packages[i].Selected = false
 				}
 			}
 		case "enter":
@@ -130,21 +125,89 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			m.confirm = true
-			m.list.Title = "Review selection — press enter to install"
 		}
 	}
-	var cmd tea.Cmd
-	m.list, cmd = m.list.Update(msg)
-	return m, cmd
+	return m, nil
 }
 
-func (m *model) toggle(index int) {
-	if index < 0 || index >= len(m.list.Items()) {
+func (m *model) toggle() {
+	if m.cursor < 0 || m.cursor >= len(m.packages) {
 		return
 	}
-	v := m.list.Items()[index].(item)
-	if v.Supported && !v.Installed {
-		v.Selected = !v.Selected
-		m.list.SetItem(index, v)
+	p := &m.packages[m.cursor]
+	if p.Supported && !p.Installed {
+		p.Selected = !p.Selected
 	}
+}
+
+func (m model) View() string {
+	var b strings.Builder
+	b.WriteString(accent.Render(banner))
+	b.WriteString("\n")
+	b.WriteString(muted.Render(fmt.Sprintf("  %s  %s", badge(string(m.platform)), m.subtitle())))
+	b.WriteString("\n\n")
+	if m.confirm {
+		b.WriteString(accent.Render("  Review installation"))
+		b.WriteString("\n")
+		b.WriteString(muted.Render("  Press enter to install selected tools · esc to cancel"))
+	} else {
+		b.WriteString(accent.Render("  Select your workstation toolkit"))
+		b.WriteString("\n")
+		b.WriteString(muted.Render("  ↑/↓ or j/k move · space toggle · a all · n none · enter review · q quit"))
+	}
+	b.WriteString("\n\n")
+	for i, p := range m.packages {
+		b.WriteString(m.renderRow(i, p))
+		b.WriteByte('\n')
+	}
+	b.WriteString("\n")
+	b.WriteString(m.footer())
+	return b.String()
+}
+
+func (m model) subtitle() string {
+	missing, chosen := 0, 0
+	for _, p := range m.packages {
+		if !p.Installed && p.Supported {
+			missing++
+			if p.Selected {
+				chosen++
+			}
+		}
+	}
+	return fmt.Sprintf("%d available · %d selected", missing, chosen)
+}
+
+func badge(platform string) string { return cyan.Render("● " + strings.ToUpper(platform)) }
+
+func (m model) renderRow(i int, p catalog.Package) string {
+	indicator := "  "
+	if i == m.cursor && !m.confirm {
+		if m.blink {
+			indicator = "▸ "
+		} else {
+			indicator = "  "
+		}
+	}
+	mark := muted.Render("○")
+	status := muted.Render("missing")
+	if p.Installed {
+		mark, status = green.Render("✓"), green.Render("installed")
+	} else if !p.Supported {
+		mark, status = red.Render("×"), red.Render("unsupported")
+	} else if p.Selected {
+		mark, status = selected.Render("●"), yellow.Render("queued")
+	}
+	name := p.Name
+	if i == m.cursor && !m.confirm {
+		name = focused.Render(name)
+	}
+	return fmt.Sprintf("%s%s  %-17s %s  %s", indicator, mark, name, muted.Render(p.Description), status)
+}
+
+func (m model) footer() string {
+	if m.confirm {
+		return yellow.Render("  ⚡ Ready to install selected tools")
+	}
+	return muted.Render("  firstboot · safe by default · no changes happen until you confirm")
 }
