@@ -16,11 +16,12 @@ if [ -z "${PREFIX:-}" ]; then
   case ":${PATH}:" in
     *:"$bin_dir":*) ;;
     *)
-      profile="$HOME/.profile"
-      [ -f "$profile" ] || : > "$profile"
-      if ! grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null; then
-        printf '\n# Added by firstboot installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"
-      fi
+      for profile in "$HOME/.profile" "$HOME/.bashrc"; do
+        [ -f "$profile" ] || : > "$profile"
+        if ! grep -Fqx 'export PATH="$HOME/.local/bin:$PATH"' "$profile" 2>/dev/null; then
+          printf '\n# Added by firstboot installer\nexport PATH="$HOME/.local/bin:$PATH"\n' >> "$profile"
+        fi
+      done
       ;;
   esac
 fi
