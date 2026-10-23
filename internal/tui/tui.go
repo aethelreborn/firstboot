@@ -22,6 +22,7 @@ type model struct {
 	searchInput     string
 	notice          string
 	blink           bool
+	quitConfirm     bool
 	cancelled       bool
 }
 
@@ -90,10 +91,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.handleSearchKey(msg)
 			return m, nil
 		}
+		if m.quitConfirm {
+			switch msg.String() {
+			case "enter":
+				m.cancelled = true
+				return m, tea.Quit
+			case "esc", "q", "n":
+				m.quitConfirm = false
+			}
+			return m, nil
+		}
 		switch msg.String() {
-		case "ctrl+c", "q", "esc":
-			m.cancelled = true
-			return m, tea.Quit
+		case "ctrl+c", "q":
+			m.quitConfirm = true
+		case "esc":
+			if m.confirm {
+				m.confirm = false
+			}
 		case "up", "k":
 			if !m.confirm && m.cursor > 0 {
 				m.cursor--
@@ -206,7 +220,11 @@ func (m model) View() string {
 	if m.confirm {
 		b.WriteString(accent.Render("  Review installation"))
 		b.WriteString("\n")
-		b.WriteString(muted.Render("  Press enter to install selected tools · esc to cancel"))
+		b.WriteString(muted.Render("  Press enter to install selected tools · esc to go back"))
+	} else if m.quitConfirm {
+		b.WriteString(accent.Render("  Quit Firstboot?"))
+		b.WriteString("\n")
+		b.WriteString(yellow.Render("  Press enter to quit · esc or n to keep working"))
 	} else {
 		b.WriteString(accent.Render("  Select your workstation toolkit"))
 		b.WriteString("\n")

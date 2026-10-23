@@ -6,7 +6,6 @@ import (
 
 	"github.com/aethelreborn/firstboot/internal/catalog"
 	"github.com/aethelreborn/firstboot/internal/detect"
-	"github.com/aethelreborn/firstboot/internal/install"
 	"github.com/aethelreborn/firstboot/internal/tui"
 )
 
@@ -25,7 +24,7 @@ func main() {
 	if len(result) == 0 {
 		return
 	}
-	if err := install.Run(platform, result); err != nil {
+	if err := tui.RunInstall(platform, result); err != nil {
 		fmt.Fprintln(os.Stderr, "firstboot:", err)
 		os.Exit(1)
 	}

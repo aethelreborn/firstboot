@@ -29,9 +29,12 @@ The scripts download the latest release for the detected architecture. Until the
 - `/`: search the native package source for any app or package
 - `b`: return from search results to the recommended toolkit
 - `enter`: review and install selected packages
-- `q`/`ctrl+c`: quit
+- `esc`: go back safely; it never quits from the main screen
+- `q`/`ctrl+c`: open quit confirmation
 
-The installer asks for elevated privileges only when the selected native package-manager command requires it. It never accepts or stores a password.
+The installer asks for elevated privileges only when the selected native package-manager command requires it. A Linux sudo password is accepted once through masked TUI input and is never stored.
+
+When Linux needs `sudo`, Firstboot asks for the password inside its TUI with masked input. Installation stays in the alternate terminal screen with a per-package progress bar. If a package fails, the run continues and shows a selectable `[ Show Error ]` row for the captured package-manager error.
 
 ## Scope
 

@@ -46,9 +46,7 @@ func TestArrowsMoveFocus(t *testing.T) {
 }
 
 func TestSelectAllAndClear(t *testing.T) {
-	m := sendKey(testModel(), tea.KeyRunes)
-	// KeyRunes is not used for command shortcuts; exercise the public update path below.
-	_ = m
+	m := testModel()
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'a'}})
 	m = updated.(model)
 	if !m.packages[0].Selected || !m.packages[1].Selected || m.packages[2].Selected {
@@ -73,4 +71,37 @@ func TestEnterOpensAndConfirmsReview(t *testing.T) {
 		t.Fatal("enter in review should return a quit command")
 	}
 	_ = updated
+}
+
+func TestEscapeIsSafeBackAction(t *testing.T) {
+	m := testModel()
+	m.confirm = true
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.confirm {
+		t.Fatal("escape should leave review without quitting")
+	}
+	if cmd != nil {
+		t.Fatal("escape should not quit from review")
+	}
+}
+
+func TestQuitRequiresConfirmation(t *testing.T) {
+	m := testModel()
+	updated, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}})
+	m = updated.(model)
+	if !m.quitConfirm {
+		t.Fatal("q should open quit confirmation")
+	}
+	if cmd != nil {
+		t.Fatal("q should not immediately quit")
+	}
+	updated, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	m = updated.(model)
+	if m.quitConfirm {
+		t.Fatal("escape should cancel quit confirmation")
+	}
+	if cmd != nil {
+		t.Fatal("escape should not quit")
+	}
 }
