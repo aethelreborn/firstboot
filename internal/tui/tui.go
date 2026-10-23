@@ -13,12 +13,16 @@ import (
 type tickMsg time.Time
 
 type model struct {
-	platform  catalog.Platform
-	packages  []catalog.Package
-	cursor    int
-	confirm   bool
-	blink     bool
-	cancelled bool
+	platform        catalog.Platform
+	packages        []catalog.Package
+	defaultPackages []catalog.Package
+	cursor          int
+	confirm         bool
+	searching       bool
+	searchInput     string
+	notice          string
+	blink           bool
+	cancelled       bool
 }
 
 const banner = `
@@ -52,7 +56,7 @@ var (
 )
 
 func Run(platform catalog.Platform, packages []catalog.Package) ([]catalog.Package, error) {
-	m := model{platform: platform, packages: packages}
+	m := model{platform: platform, packages: packages, defaultPackages: packages}
 	final, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
 	if err != nil {
 		return nil, err
@@ -82,6 +86,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blink = !m.blink
 		return m, blinkCmd()
 	case tea.KeyMsg:
+		if m.searching {
+			m.handleSearchKey(msg)
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c", "q", "esc":
 			m.cancelled = true
@@ -99,7 +107,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = 0
 			}
 		case "end", "G":
-			if !m.confirm {
+			if !m.confirm && len(m.packages) > 0 {
 				m.cursor = len(m.packages) - 1
 			}
 		case " ", "space":
@@ -108,17 +116,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "a":
 			if !m.confirm {
-				for i := range m.packages {
-					if m.packages[i].Supported && !m.packages[i].Installed {
-						m.packages[i].Selected = true
-					}
-				}
+				m.selectAll()
 			}
 		case "n":
 			if !m.confirm {
-				for i := range m.packages {
-					m.packages[i].Selected = false
-				}
+				m.clearSelection()
+			}
+		case "/":
+			if !m.confirm {
+				m.searching = true
+				m.searchInput = ""
+				m.notice = ""
+			}
+		case "b":
+			if !m.confirm {
+				m.packages = append([]catalog.Package(nil), m.defaultPackages...)
+				m.cursor = 0
+				m.notice = "Back to recommended tools"
 			}
 		case "enter":
 			if m.confirm {
@@ -130,6 +144,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+func (m *model) handleSearchKey(msg tea.KeyMsg) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.searching = false
+	case tea.KeyBackspace:
+		if len(m.searchInput) > 0 {
+			m.searchInput = m.searchInput[:len(m.searchInput)-1]
+		}
+	case tea.KeyEnter:
+		query := strings.TrimSpace(m.searchInput)
+		if query == "" {
+			m.notice = "Type an app or package name first"
+			return
+		}
+		results, err := catalog.Search(m.platform, query)
+		m.searching = false
+		m.cursor = 0
+		if err != nil {
+			m.packages = nil
+			m.notice = err.Error()
+			return
+		}
+		m.packages = results
+		m.notice = fmt.Sprintf("%d results for %q · space queues · b returns to recommendations", len(results), query)
+	case tea.KeyRunes:
+		m.searchInput += string(msg.Runes)
+	}
+}
+
 func (m *model) toggle() {
 	if m.cursor < 0 || m.cursor >= len(m.packages) {
 		return
@@ -137,6 +180,20 @@ func (m *model) toggle() {
 	p := &m.packages[m.cursor]
 	if p.Supported && !p.Installed {
 		p.Selected = !p.Selected
+	}
+}
+
+func (m *model) selectAll() {
+	for i := range m.packages {
+		if m.packages[i].Supported && !m.packages[i].Installed {
+			m.packages[i].Selected = true
+		}
+	}
+}
+
+func (m *model) clearSelection() {
+	for i := range m.packages {
+		m.packages[i].Selected = false
 	}
 }
 
@@ -153,9 +210,25 @@ func (m model) View() string {
 	} else {
 		b.WriteString(accent.Render("  Select your workstation toolkit"))
 		b.WriteString("\n")
-		b.WriteString(muted.Render("  ↑/↓ or j/k move · space toggle · a all · n none · enter review · q quit"))
+		b.WriteString(muted.Render("  ↑/↓ or j/k move · space toggle · / search apps · enter review · q quit"))
 	}
 	b.WriteString("\n\n")
+	if m.searching {
+		b.WriteString(accent.Render("  Search native package sources"))
+		b.WriteString("\n")
+		b.WriteString(focused.Render("  / " + m.searchInput + "▌"))
+		b.WriteString("\n")
+		b.WriteString(muted.Render("  Try discord, vscode, android studio, vlc, or any package name"))
+		b.WriteString("\n\n")
+	}
+	if m.notice != "" {
+		b.WriteString(yellow.Render("  " + m.notice))
+		b.WriteString("\n\n")
+	}
+	if len(m.packages) == 0 && !m.searching {
+		b.WriteString(muted.Render("  No results. Press / to search again or b to return to recommendations."))
+		b.WriteString("\n")
+	}
 	for i, p := range m.packages {
 		b.WriteString(m.renderRow(i, p))
 		b.WriteByte('\n')
@@ -209,5 +282,5 @@ func (m model) footer() string {
 	if m.confirm {
 		return yellow.Render("  ⚡ Ready to install selected tools")
 	}
-	return muted.Render("  firstboot · safe by default · no changes happen until you confirm")
+	return muted.Render("  firstboot · / searches native package sources · no changes happen until confirmation")
 }

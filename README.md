@@ -26,6 +26,8 @@ The scripts download the latest release for the detected architecture. Until the
 - `space`: toggle a package
 - `a`: select all missing packages
 - `n`: clear the selection
+- `/`: search the native package source for any app or package
+- `b`: return from search results to the recommended toolkit
 - `enter`: review and install selected packages
 - `q`/`ctrl+c`: quit
 
@@ -33,7 +35,9 @@ The installer asks for elevated privileges only when the selected native package
 
 ## Scope
 
-The initial catalog covers Git, Docker, Node.js, Python, JDK, Rust, Go, and optional AI developer CLIs including Claude Code, OpenCode, Hermes, and OpenClaw. Package availability is detected per OS and package manager. Unsupported entries are shown as unavailable instead of being silently skipped.
+The recommended catalog covers Git, Docker, Node.js, Python, JDK, Rust, Go, and optional AI developer CLIs including Claude Code, OpenCode, Hermes, and OpenClaw. Press `/` to search beyond the recommendations: Linux queries APT, DNF, or Snap; Windows queries WinGet; and macOS queries Homebrew. This makes apps such as Discord, VS Code, Android Studio, VLC, and future packages available through the configured native source without hardcoding every app into Firstboot.
+
+Search results retain the exact package identifier returned by the native source. Firstboot shows the result list before installation, so a broad query can be narrowed down to the correct app rather than silently installing an ambiguous match.
 
 The tool does not disable animations, modify shell profiles, or remove files automatically in the initial release. Those actions need explicit, reviewed recipes before they belong in a safe bootstrapper.
 
