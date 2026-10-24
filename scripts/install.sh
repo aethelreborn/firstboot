@@ -46,7 +46,22 @@ sleep 0.15
 printf '\r%s\n' "${green}[1/4] Platform: $os/$arch${reset}"
 
 printf '%s' "${cyan}[2/4] Checking latest release...${reset}"
-version="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repo/releases/latest" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+version=""
+auth_header=""
+if [ -n "${GITHUB_TOKEN:-}" ]; then
+  auth_header="Authorization: Bearer $GITHUB_TOKEN"
+elif [ -n "${GH_TOKEN:-}" ]; then
+  auth_header="Authorization: Bearer $GH_TOKEN"
+fi
+if [ -n "$auth_header" ]; then
+  version="$(curl -fsSL --retry 3 -H "$auth_header" -H "Accept: application/vnd.github+json" "https://api.github.com/repos/$repo/releases/latest" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+fi
+if [ -z "$version" ]; then
+  version="$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' "https://github.com/$repo/releases/latest" | sed -n 's#.*/tag/##p')"
+fi
+if [ -z "$version" ]; then
+  version="$(curl -fsSL --retry 3 "https://api.github.com/repos/$repo/releases/latest" | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"//; s/"$//')"
+fi
 if [ -z "$version" ]; then
   printf '\r%s\n' "${red}[2/4] No GitHub release found.${reset}" >&2
   exit 1

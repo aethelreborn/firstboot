@@ -49,13 +49,19 @@ func (m installModel) Init() tea.Cmd {
 
 func (m installModel) startInstall() tea.Cmd {
 	platform, packages, password := m.platform, m.packages, m.password
+	pw := password
 	return func() tea.Msg {
 		events := make(chan installEvent)
 		go func() {
-			failures := install.RunWithProgress(platform, packages, password, func(progress install.Progress) {
+			defer func() {
+				// best effort to drop password references
+				pw = ""
+			}()
+			failures := install.RunWithProgress(platform, packages, pw, func(progress install.Progress) {
 				copy := progress
 				events <- installEvent{progress: &copy}
 			})
+			pw = ""
 			events <- installEvent{failures: failures, done: true}
 			close(events)
 		}()
@@ -99,6 +105,16 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nextInstallEvent(m.events)
 	case tea.KeyMsg:
 		if m.passwordRequired && !m.installing && !m.done {
+			if m.quitConfirm {
+				switch msg.String() {
+				case "enter":
+					m.password = ""
+					return m, tea.Quit
+				case "esc", "q", "n":
+					m.quitConfirm = false
+				}
+				return m, nil
+			}
 			switch msg.Type {
 			case tea.KeyRunes:
 				m.password += string(msg.Runes)
@@ -107,11 +123,17 @@ func (m installModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.password = m.password[:len(m.password)-1]
 				}
 			case tea.KeyEnter:
+				pw := m.password
+				m.password = ""
 				m.passwordRequired = false
 				m.installing = true
-				return m, m.startInstall()
-			case tea.KeyEsc:
-				return m, tea.Quit
+				m.password = pw
+				cmd := m.startInstall()
+				m.password = ""
+				return m, cmd
+			case tea.KeyEsc, tea.KeyCtrlC:
+				m.quitConfirm = true
+				return m, nil
 			}
 			return m, nil
 		}
@@ -163,6 +185,13 @@ func (m installModel) View() string {
 	b.WriteString(accent.Render(banner))
 	b.WriteString("\n\n")
 	if m.passwordRequired && !m.installing {
+		if m.quitConfirm {
+			b.WriteString(accent.Render("  Cancel installation?"))
+			b.WriteString("\n")
+			b.WriteString(yellow.Render("  Press enter to cancel · esc or n to go back"))
+			b.WriteString("\n\n")
+			return b.String()
+		}
 		b.WriteString(accent.Render("  Administrator access required"))
 		b.WriteString("\n")
 		b.WriteString(muted.Render("  Enter your sudo password. It is used once and never stored."))
